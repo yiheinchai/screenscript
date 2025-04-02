@@ -1,18 +1,15 @@
 # --- START OF FILE macro.py ---
 
-# pymacrorecord_lib/macro_playback.py
 from pynput import mouse, keyboard
 from pynput.keyboard import Key, Listener as KeyboardListener
 from pynput.mouse import Button
 import time
 from time import sleep
 from datetime import datetime
-from threading import (
-    Thread,
-    RLock,
-)  # Import RLock for thread safety if needed (added precaution)
+from threading import Thread, RLock
 import json
 import os
+import sys  # Import sys for stderr
 
 # ... (Keep KEY_NAME_MAP and vk_nb dictionaries as they are) ...
 KEY_NAME_MAP = {
@@ -33,7 +30,7 @@ KEY_NAME_MAP = {
     "alt": Key.alt,
     "shift": Key.shift,
     "cmd": Key.cmd,
-    "win": Key.cmd,  # Alias for windows/command key
+    "win": Key.cmd,
     "space": Key.space,
     "enter": Key.enter,
     "tab": Key.tab,
@@ -45,11 +42,8 @@ KEY_NAME_MAP = {
     "right": Key.right,
     "page_up": Key.page_up,
     "page_down": Key.page_down,
-    # 'home': Key.home, 'end': Key.end, 'insert': Key.insert,
     "caps_lock": Key.caps_lock,
-    # Add other keys if required
 }
-
 vk_nb = {
     "<96>": "0",
     "<97>": "1",
@@ -66,75 +60,32 @@ vk_nb = {
 }
 
 
+# --- MacroPlayback Class (Listener Logic Removed) ---
 class MacroPlayback:
-    """Core playback logic extracted from the GUI Macro class"""
+    """Core playback logic - Listener managed by PyMacroRecordLib"""
 
-    def __init__(self, settings, stop_key=Key.esc):
+    # Remove __init__ parameters related to stop_key and listener
+    def __init__(self, settings):
         self.mouse_control = mouse.Controller()
         self.keyboard_control = keyboard.Controller()
         self.playback = False
         self.macro_events = {"events": []}
         self.settings = settings
         self.__play_macro_thread = None
-        self._stop_listener = None
-        self.stop_key = stop_key
-        self._lock = (
-            RLock()
-        )  # Lock for thread safety on shared state like self.playback
-
-    def set_stop_key(self, key):
-        """Set the key used to stop playback."""
-        self.stop_key = key
-        print(f"Stop key set to: {key}")
-
-    def _parse_key_string(self, key_string):
-        """Helper to parse a string into a pynput Key object or character."""
-        key_string = key_string.lower().strip()
-        if key_string in KEY_NAME_MAP:
-            return KEY_NAME_MAP[key_string]
-        elif len(key_string) == 1:
-            return key_string
-        else:
-            try:
-                key = eval(f"Key.{key_string}", {"Key": Key})
-                if isinstance(key, Key):
-                    return key
-            except Exception:
-                pass
-            print(
-                f"Warning: Could not parse stop key '{key_string}'. Using default: {self.stop_key}"
-            )
-            return self.stop_key
-
-    def set_stop_key_from_string(self, key_string):
-        """Set the stop key from a string representation."""
-        parsed_key = self._parse_key_string(key_string)
-        self.set_stop_key(parsed_key)
+        # self._stop_listener = None # REMOVED
+        # self.stop_key = stop_key # REMOVED
+        self._lock = RLock()
 
     def load_macro(self, macro_data):
         """Load macro events from a dictionary (parsed JSON)"""
         self.macro_events = macro_data
 
-    def _on_press_stop_key(self, key):
-        """Callback function for the keyboard listener."""
-        try:
-            if key == self.stop_key:
-                print(
-                    f"\nStop key ({self.stop_key}) pressed. Attempting to stop playback..."
-                )
-                # Use the lock to ensure stop_playback is called safely
-                # Call stop_playback in a separate thread to avoid blocking the listener thread
-                Thread(target=self.stop_playback, daemon=True).start()
-                # Optionally stop the listener itself immediately if desired
-                # return False # Returning False stops the listener thread
-        except AttributeError:
-            pass
-        except Exception as e:
-            print(f"Error in stop key listener callback: {e}")
+    # REMOVE set_stop_key, _parse_key_string, set_stop_key_from_string methods
+    # REMOVE _on_press_stop_key method
 
     def start_playback(self):
-        """Start macro playback programmatically."""
-        with self._lock:  # Ensure thread-safe check/set of playback flag
+        """Start macro playback programmatically. Returns True on success, False otherwise."""
+        with self._lock:
             if not self.macro_events["events"]:
                 print("No macro loaded or macro is empty.")
                 return False
@@ -143,75 +94,35 @@ class MacroPlayback:
                 return False
             if self.__play_macro_thread and self.__play_macro_thread.is_alive():
                 print(
-                    "Playback thread is already running (previous run not fully stopped?)."
+                    "Warning: Playback thread seems to be already running.",
+                    file=sys.stderr,
                 )
+                # Optionally try to join/stop previous thread? Risky. Better to prevent.
                 return False  # Prevent starting if thread already exists
 
             self.playback = True  # Set flag *before* starting threads
 
-        # --- Stop Listener Management ---
-        # Stop existing listener *before* starting a new one
-        if self._stop_listener and self._stop_listener.is_alive():
-            print("Stopping existing keyboard listener...")
-            try:
-                self._stop_listener.stop()
-                # Give listener thread a moment to stop
-                # self._stop_listener.join(timeout=0.5) # Optional join with timeout
-            except Exception as e:
-                print(f"Error stopping previous listener: {e}")
-            finally:
-                self._stop_listener = None
-
-        # Start the stop key listener
-        try:
-            # Use suppress=False so the stop key might still work in other apps if needed
-            self._stop_listener = KeyboardListener(
-                on_press=self._on_press_stop_key, daemon=True
-            )
-            self._stop_listener.start()
-            print(f"Playback starting. Press '{self.stop_key}' to stop.")
-        except Exception as e:
-            print(f"Error starting keyboard listener: {e}. Playback aborted.")
-            with self._lock:
-                self.playback = False  # Reset flag if listener fails
-            return False  # Indicate failure
-
         # --- Playback Thread ---
         # Ensure previous thread object is cleared if it finished/died
         self.__play_macro_thread = None
+        print("Starting playback thread...")
         self.__play_macro_thread = Thread(target=self.__play_events, daemon=True)
         self.__play_macro_thread.start()
         return True  # Indicate success
 
     def stop_playback(self):
         """Stop macro playback programmatically. Thread-safe."""
-        print("Stop playback requested...")
-        should_stop_listener = False
+        print("Playback engine stop requested...")
         with self._lock:
             if not self.playback:
-                print("Playback is not currently marked as active.")
+                # print("Playback engine is not currently marked as active.") # Less verbose
                 return  # Already stopped or stopping
 
-            print("Setting playback flag to False.")
+            print("Setting playback engine flag to False.")
             self.playback = False  # Set flag to signal the playback thread
-            should_stop_listener = True  # Mark listener to be stopped outside the lock
 
-        # Stop the keyboard listener *after* releasing the lock
-        if should_stop_listener and self._stop_listener:
-            print("Stopping keyboard listener...")
-            listener_to_stop = self._stop_listener  # Copy reference
-            self._stop_listener = None  # Clear the instance variable quickly
-            try:
-                listener_to_stop.stop()
-                # listener_to_stop.join(timeout=0.5) # Optional join
-                print("Keyboard listener stop requested.")
-            except Exception as e:
-                print(f"Error stopping listener: {e}")
-
-        # Note: We don't forcefully join the __play_macro_thread here.
-        # It checks the `self.playback` flag internally and should exit.
-        # Being a daemon thread helps ensure it doesn't block program exit.
-        print("Playback stop process initiated.")
+        # Listener is stopped by PyMacroRecordLib now
+        print("Playback engine stop process initiated.")
 
     def __play_events(self):
         """Internal method to execute macro events in a thread."""
@@ -222,7 +133,7 @@ class MacroPlayback:
             "rightClickEvent": Button.right,
             "middleClickEvent": Button.middle,
         }
-        key_to_unpress = []  # Tracks keys pressed *within this playback run*
+        key_to_unpress = []
         repeat_times = (
             user_settings["Playback"]["Repeat"]["Times"]
             if user_settings["Playback"]["Repeat"]["For"] == 0
@@ -238,6 +149,7 @@ class MacroPlayback:
         # --- Scheduled Start ---
         scheduled_start_sec = user_settings["Playback"]["Repeat"]["Scheduled"]
         if scheduled_start_sec > 0:
+            # ... (scheduled start logic remains the same, checking self.playback) ...
             now = datetime.now()
             seconds_since_midnight = (
                 now - now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -250,57 +162,56 @@ class MacroPlayback:
                 print(f"Scheduled start: Waiting for {seconds_to_wait:.2f} seconds...")
                 wait_interval = 0.5
                 while seconds_to_wait > 0:
-                    with self._lock:  # Check playback flag safely
+                    with self._lock:
                         if not self.playback:
                             break
                     sleep(min(wait_interval, seconds_to_wait))
                     seconds_to_wait -= wait_interval
-
-                with self._lock:  # Final check before proceeding
+                with self._lock:
                     if not self.playback:
-                        print("Playback stopped before scheduled start.")
+                        print(
+                            "Playback stopped by external request before scheduled start."
+                        )
                         self.__unpress_everything(key_to_unpress)
-                        # No need to call stop_playback again, it was triggered externally
-                        return  # Exit thread
-
+                        return
                 print("Scheduled time reached. Starting playback.")
 
         # --- Repeat Loop ---
         repeat_count = 0
         loop_running = True
         while loop_running:
-            # --- Check Stop Condition AT START of loop iteration ---
-            with self._lock:
+            with self._lock:  # Check stop flag at start of loop
                 if not self.playback:
                     print("Playback flag is false at start of repeat loop.")
                     loop_running = False
-                    break  # Exit the while loop
+                    break
 
             repeat_count += 1
-            # Check duration limit
+            # Check duration/times limits
             if repeat_duration and (time.time() - start_time) >= repeat_duration:
                 print(f"Repeat duration ({repeat_duration}s) reached.")
                 loop_running = False
                 break
-            # Check 'Times' limit if duration is not set
             if not repeat_duration and repeat_count > repeat_times:
                 print(f"Repeat times ({repeat_times}) reached.")
                 loop_running = False
                 break
 
-            print(f"--- Starting Repeat #{repeat_count} ---")
+            # print(f"--- Starting Repeat #{repeat_count} ---") # Can be verbose
 
             # --- Event Loop ---
             for event_data in self.macro_events["events"]:
-                # --- Check Stop Condition BEFORE EACH event ---
-                with self._lock:
+                with self._lock:  # Check stop flag before each event
                     if not self.playback:
-                        print("Playback stopped during event execution.")
+                        print(
+                            "Playback stopped by external request during event execution."
+                        )
                         loop_running = False
-                        break  # Exit the inner for loop
+                        break
 
-                # Calculate Sleep Time (apply fixed or speed multiplier)
+                # Calculate Sleep Time
                 time_sleep = event_data["timestamp"]
+                # ... (sleep calculation logic remains the same) ...
                 if user_settings["Others"]["Fixed_timestamp"] > 0:
                     time_sleep = user_settings["Others"]["Fixed_timestamp"] / 1000.0
                 else:
@@ -315,24 +226,26 @@ class MacroPlayback:
                 sleep_interval = 0.05
                 remaining_sleep = time_sleep
                 while remaining_sleep > 0:
-                    with self._lock:  # Check playback flag safely during sleep
+                    with self._lock:  # Check stop flag during sleep
                         if not self.playback:
                             break
                     sleep(min(sleep_interval, remaining_sleep))
                     remaining_sleep -= sleep_interval
-
-                with self._lock:  # Final check after sleep before event execution
+                with self._lock:  # Check again after sleep
                     if not self.playback:
-                        print("Playback stopped during sleep interval.")
+                        print(
+                            "Playback stopped by external request during sleep interval."
+                        )
                         loop_running = False
-                        break  # Exit the inner for loop
+                        break
 
                 # --- Execute Event ---
                 if not loop_running:
-                    break  # Already decided to stop
+                    break  # Exit if stopped during sleep
 
                 event_type = event_data["type"]
                 try:
+                    # ... (event execution logic remains the same) ...
                     if event_type == "cursorMove":
                         self.mouse_control.position = (event_data["x"], event_data["y"])
                     elif event_type in click_func:
@@ -353,7 +266,8 @@ class MacroPlayback:
                                     key_to_press = eval(key_str, {"Key": Key})
                                 except Exception as e:
                                     print(
-                                        f"Warning: Could not evaluate key '{key_str}': {e}"
+                                        f"Warning: Could not evaluate key '{key_str}': {e}",
+                                        file=sys.stderr,
                                     )
                             elif key_str in vk_nb:
                                 key_to_press = vk_nb[key_str]
@@ -371,18 +285,22 @@ class MacroPlayback:
                                         try:
                                             key_to_unpress.remove(key_to_press)
                                         except ValueError:
-                                            pass  # Ignore if already removed
+                                            pass
+
                 except Exception as e:
-                    print(f"Error during playback execution (Event: {event_data}): {e}")
-                    print("Stopping playback due to error.")
+                    print(
+                        f"Error during playback execution (Event: {event_data}): {e}",
+                        file=sys.stderr,
+                    )
+                    print("Stopping playback engine due to error.", file=sys.stderr)
                     loop_running = False  # Signal to exit loops
-                    # Trigger the main stop mechanism to ensure cleanup
+                    # Signal the engine's stop mechanism
                     Thread(target=self.stop_playback, daemon=True).start()
-                    break  # Exit inner for loop
+                    break
 
             # --- Check Stop Condition AFTER event loop ---
             if not loop_running:
-                break  # Exit the outer while loop
+                break
 
             # --- Delay Between Repeats ---
             repeat_delay = user_settings["Playback"]["Repeat"]["Delay"]
@@ -391,7 +309,7 @@ class MacroPlayback:
             )
 
             if repeat_delay > 0 and not is_last_repeat:
-                print(f"--- Delaying for {repeat_delay}s before next repeat ---")
+                # print(f"--- Delaying for {repeat_delay}s before next repeat ---") # Verbose
                 sleep_interval = 0.1
                 remaining_delay = repeat_delay
                 while remaining_delay > 0:
@@ -400,65 +318,50 @@ class MacroPlayback:
                             break
                     sleep(min(sleep_interval, remaining_delay))
                     remaining_delay -= sleep_interval
-
-                with self._lock:  # Final check after delay
+                with self._lock:
                     if not self.playback:
-                        print("Playback stopped during repeat delay.")
+                        print(
+                            "Playback stopped by external request during repeat delay."
+                        )
                         loop_running = False
-                        # No break needed here, loop condition will handle it
+                        # No break needed here, loop condition handles it
 
         # --- End of Playback ---
-        print("Playback loop finished or was stopped.")
-        self.__unpress_everything(
-            key_to_unpress
-        )  # Release keys pressed during this run
+        print("Playback engine loop finished or was stopped.")
+        self.__unpress_everything(key_to_unpress)
 
-        # Ensure playback flag is false and listener is handled by calling stop_playback
-        # This is important if the loop finished naturally (not via stop key/error)
-        print("Ensuring final cleanup...")
-        # Call stop_playback again to ensure listener is stopped if loop finished naturally
-        # Check the flag *before* calling stop to avoid redundant messages if already stopped
-        stop_needed = False
+        # --- Crucially: Set playback flag to False *from within the thread* when done ---
+        # This indicates the thread has finished its work naturally.
+        print("Playback thread marking itself as finished.")
         with self._lock:
-            if self.playback:  # If it wasn't set to False by stop_key/error
-                stop_needed = True
-        if stop_needed:
-            self.stop_playback()  # This will set self.playback=False and stop listener
+            self.playback = False
 
         print("Playback thread terminating.")
 
     def __unpress_everything(self, key_to_unpress):
         """Release keys tracked *during this specific playback run*."""
-        print(f"Releasing {len(key_to_unpress)} potentially held keys...")
-        # Release tracked keys
-        keys_released_count = 0
-        # Iterate over a copy in case of modification issues (though remove should handle it)
-        for key in list(key_to_unpress):
-            try:
-                self.keyboard_control.release(key)
-                keys_released_count += 1
-                # Keep track of keys actually pressed during this run, attempt removal
+        # ... (unpress logic remains the same) ...
+        if key_to_unpress:
+            print(f"Releasing {len(key_to_unpress)} potentially held keys...")
+            keys_released_count = 0
+            for key in list(key_to_unpress):
                 try:
-                    key_to_unpress.remove(key)
-                except ValueError:
-                    pass  # Already removed, shouldn't happen if iterating list copy but safe
-            except Exception as e:
-                # print(f"Note: Error releasing key {key}: {e}") # Optional verbose log
-                pass
-        print(f"Attempted release for {keys_released_count} keys.")
-        # It's generally safer *not* to blindly release mouse buttons here,
-        # as the macro should have handled releases. Blind releases might
-        # interfere if the user manually holds a button.
+                    self.keyboard_control.release(key)
+                    keys_released_count += 1
+                    try:
+                        key_to_unpress.remove(key)
+                    except ValueError:
+                        pass
+                except Exception:
+                    pass
+            # print(f"Attempted release for {keys_released_count} keys.")
 
 
 # --- Dummy UserSettings (Keep as is or import your actual class) ---
 try:
-    from utils.user_settings import UserSettings
-except ImportError:
-    print("Warning: Could not import UserSettings from utils. Using placeholder.")
-
+    # from utils.user_settings import UserSettings # Use your actual path
+    # Dummy class provided if import fails
     class UserSettings:
-        # ... (Keep the dummy UserSettings class definition as before) ...
         def __init__(self, _):
             self._config = {
                 "Playback": {
@@ -473,15 +376,14 @@ except ImportError:
                 },
                 "Others": {"Fixed_timestamp": 0},
             }
-            self._lock = RLock()  # Add lock for settings access if needed
+            self._lock = RLock()
 
         def get_config(self):
-            with self._lock:  # Use lock if settings could be read/written concurrently
-                # Return a deep copy if necessary to prevent modification? For now, return direct dict.
+            with self._lock:
                 return self._config
 
         def change_settings(self, section, sub_section, key, value):
-            with self._lock:  # Lock during modification
+            with self._lock:
                 try:
                     if key:
                         self._config[section][sub_section][key] = value
@@ -489,67 +391,165 @@ except ImportError:
                         self._config[section][sub_section] = value
                     else:
                         self._config[section] = value
-                    # print(f"Setting updated: {section}/{sub_section}/{key} = {value}") # Less verbose
                 except KeyError:
-                    print(f"Error: Invalid setting path {section}/{sub_section}/{key}")
+                    print(
+                        f"Error: Invalid setting path {section}/{sub_section}/{key}",
+                        file=sys.stderr,
+                    )
+
+except ImportError:
+    print("Warning: Could not import UserSettings. Using placeholder.", file=sys.stderr)
+    # Define the dummy UserSettings class here if needed
 
 
-# --- PyMacroRecordLib as Singleton ---
+# --- PyMacroRecordLib as Singleton (Modified for Global Listener) ---
 class PyMacroRecordLib:
     _instance = None
-    _lock = RLock()  # Class level lock for thread-safe singleton instantiation
+    _lock = RLock()  # Lock for singleton creation
 
     def __new__(cls, *args, **kwargs):
-        # Double-checked locking for thread safety
         if cls._instance is None:
             with cls._lock:
-                # Check again inside the lock in case another thread created it
-                # while the first thread was waiting for the lock
                 if cls._instance is None:
                     print("Creating new PyMacroRecordLib singleton instance.")
                     cls._instance = super().__new__(cls)
-                    # Mark as uninitialized *before* calling __init__
                     cls._instance._initialized = False
-        # else:
-        # print("Returning existing PyMacroRecordLib singleton instance.") # Can be noisy
         return cls._instance
 
     def __init__(self):
-        """
-        Initialize the singleton instance *only once*.
-        Subsequent calls to PyMacroRecordLib() will return the existing
-        instance, and this __init__ will detect it's already initialized.
-        """
-        # Prevent re-initialization using an instance flag
         if getattr(self, "_initialized", False):
-            # print("Singleton already initialized.") # Can be noisy
             return
 
         print("Initializing PyMacroRecordLib singleton...")
-        with self._lock:  # Protect initialization attributes
-            # Initialize settings
-            try:
-                self.settings = UserSettings(None)
-            except Exception as e:
-                print(
-                    f"Error initializing UserSettings: {e}. Using placeholder settings."
-                )
-                self.settings = UserSettings(None)  # Fallback
-
-            # Initialize playback engine *once*
+        with self._lock:  # Protect initialization
+            # --- Core Attributes ---
+            self.settings = UserSettings(None)  # Or load your actual settings
             self.playback_engine = MacroPlayback(self.settings)
-            self._active = False  # Track intended playback state
+            self._active = False  # Tracks if WE intended playback to start
 
-            # Mark as initialized *after* all initialization is done
+            # --- NEW: State for Main Loop Control ---
+            self.user_requested_main_loop_stop = False
+            self._main_stop_lock = RLock()  # Separate lock for this flag
+
+            # --- NEW: Listener Attributes (moved from MacroPlayback) ---
+            self._stop_listener = None
+            self.stop_key = Key.esc  # Default stop key
+
+            # --- Start the listener ONCE during singleton initialization ---
+            self._start_global_listener()
+
             self._initialized = True
-            print("Singleton initialization complete.")
+            print("Singleton initialization complete. Global listener started.")
+
+    # --- NEW: Listener Methods (moved here) ---
+    def _parse_key_string(self, key_string):
+        """Helper to parse a string into a pynput Key object or character."""
+        key_string = key_string.lower().strip()
+        if key_string in KEY_NAME_MAP:
+            return KEY_NAME_MAP[key_string]
+        elif len(key_string) == 1:
+            return key_string
+        else:
+            try:
+                key = eval(f"Key.{key_string}", {"Key": Key})
+                if isinstance(key, Key):
+                    return key
+            except Exception:
+                pass
+            print(
+                f"Warning: Could not parse stop key '{key_string}'. Using default: {self.stop_key}",
+                file=sys.stderr,
+            )
+            return self.stop_key
+
+    def set_stop_key(self, key_string):
+        """Set the key used to stop playback AND the main loop."""
+        parsed_key = self._parse_key_string(key_string)
+        if self.stop_key != parsed_key:
+            self.stop_key = parsed_key
+            print(f"Global stop key set to: {self.stop_key}")
+            # Restart listener with the new key
+            self._stop_global_listener()
+            self._start_global_listener()
+
+    def _on_press_stop_key(self, key):
+        """Callback for the global keyboard listener."""
+        try:
+            if key == self.stop_key:
+                print(f"\n>>> Global Stop Key ({self.stop_key}) pressed! <<<")
+
+                # 1. Signal the main loop to stop
+                print("Signaling main loop termination...")
+                self.request_main_loop_stop()  # Use the new method
+
+                # 2. Signal the current playback engine run to stop (if active)
+                print("Requesting current macro playback engine stop...")
+                # Run stop_playback in a thread to avoid blocking listener
+                Thread(target=self.playback_engine.stop_playback, daemon=True).start()
+
+        except Exception as e:
+            print(f"Error in global stop key listener callback: {e}", file=sys.stderr)
+
+    def _start_global_listener(self):
+        """Starts the single global keyboard listener."""
+        if self._stop_listener is not None:
+            print(
+                "Warning: Global listener already exists. Stopping previous one.",
+                file=sys.stderr,
+            )
+            self._stop_global_listener()
+        try:
+            print(f"Starting global listener for stop key: {self.stop_key}")
+            # Create as daemon so it doesn't block exit
+            self._stop_listener = KeyboardListener(
+                on_press=self._on_press_stop_key, daemon=True
+            )
+            self._stop_listener.start()
+        except Exception as e:
+            print(
+                f"FATAL: Error starting global keyboard listener: {e}", file=sys.stderr
+            )
+            self._stop_listener = None  # Ensure it's None if start failed
+
+    def _stop_global_listener(self):
+        """Stops the single global keyboard listener."""
+        if self._stop_listener:
+            print("Stopping global listener...")
+            try:
+                self._stop_listener.stop()
+                # self._stop_listener.join(timeout=0.5) # Optional wait
+            except Exception as e:
+                print(f"Error stopping global listener: {e}", file=sys.stderr)
+            finally:
+                self._stop_listener = None
+
+    # --- NEW: Methods for Main Loop Control ---
+    def request_main_loop_stop(self):
+        """Sets the flag to indicate the main loop should stop."""
+        with self._main_stop_lock:
+            self.user_requested_main_loop_stop = True
+            print("Main loop stop request flag SET.")
+
+    def should_main_loop_stop(self):
+        """Checks if the main loop stop has been requested."""
+        with self._main_stop_lock:
+            # print(f"Checking main loop stop flag: {self.user_requested_main_loop_stop}") # Debug
+            return self.user_requested_main_loop_stop
+
+    def reset_main_loop_stop_request(self):
+        """Resets the flag before starting a batch run."""
+        with self._main_stop_lock:
+            if self.user_requested_main_loop_stop:
+                print("Resetting main loop stop request flag.")
+                self.user_requested_main_loop_stop = False
 
     # --- Core Methods (operate on the single playback_engine) ---
 
     def load_macro_file(self, file_path):
         """Load a macro file (.pmr or .json)."""
+        # ... (load logic remains the same, uses self.playback_engine) ...
         if not os.path.exists(file_path):
-            print(f"Error: Macro file not found at: {file_path}")
+            print(f"Error: Macro file not found: {file_path}", file=sys.stderr)
             return False
         try:
             with open(file_path, "r") as f:
@@ -559,190 +559,209 @@ class PyMacroRecordLib:
                 or "events" not in macro_data
                 or not isinstance(macro_data["events"], list)
             ):
-                print(f"Error: Invalid macro format in: {file_path}.")
+                print(f"Error: Invalid macro format in: {file_path}.", file=sys.stderr)
                 return False
-            # Load into the single playback engine
             self.playback_engine.load_macro(macro_data)
-            print(f"Macro file loaded into singleton engine from: {file_path}")
+            # print(f"Macro loaded: {os.path.basename(file_path)}") # Less verbose
             return True
-        except json.JSONDecodeError:
-            print(f"Error: Invalid JSON format in: {file_path}")
-            return False
         except Exception as e:
-            print(f"Error loading macro file: {e}")
+            print(f"Error loading macro file {file_path}: {e}", file=sys.stderr)
             return False
 
     def start_playback(self):
         """Start the loaded macro playback using the singleton engine."""
-        # Check intended state first
         if self._active:
-            print("Playback start requested, but already marked as active.")
-            # Optionally check engine state too: if not self.playback_engine.playback: ...
-            return
+            print(
+                "Warning: Playback start requested, but already marked as active.",
+                file=sys.stderr,
+            )
+            return  # Don't start again if we think it's running
 
-        print("Attempting to start playback via singleton engine...")
-        # Call the engine's start method
+        # Reset engine's internal flag just in case it got stuck? Risky.
+        # Assume engine state is reliable.
+
+        print("Attempting to start playback engine...")
         success = self.playback_engine.start_playback()
         if success:
-            self._active = True  # Mark as active only if engine start was successful
-            print("Playback successfully started.")
+            self._active = True  # Mark that we initiated a start
+            print("Playback engine successfully started.")
         else:
-            self._active = False  # Ensure state reflects failed start
-            print("Playback failed to start.")
+            self._active = False
+            print("Playback engine failed to start.", file=sys.stderr)
 
     def stop_playback(self):
         """Stop the macro playback if it's running using the singleton engine."""
-        # Check intended state first
-        if not self._active:
-            print("Stop playback requested, but not marked as active.")
-            # Optionally check engine state too: if self.playback_engine.playback: ...
-            # return # Maybe don't return, allow stopping engine even if _active is false?
-
-        print("Attempting to stop playback via singleton engine...")
-        # Call the engine's stop method
+        # This method is primarily for programmatic stopping, Esc uses the listener directly.
+        print("Programmatic stop requested for playback engine.")
         self.playback_engine.stop_playback()
-        self._active = False  # Always mark as inactive after requesting stop
-        print("Playback stop requested.")
+        self._active = (
+            False  # Mark that we requested stop / it's no longer intended active
+        )
 
     def is_playing(self):
-        """Check if playback is currently active via the singleton engine."""
-        # Primarily rely on the engine's actual state flag
-        engine_playing = self.playback_engine.playback
-        # Optionally sync the internal _active flag if needed, though engine's flag is more real-time
-        # self._active = engine_playing
-        return engine_playing
+        """Check if the playback engine THREAD is currently active."""
+        # Check the engine's internal flag, which reflects the thread's state
+        engine_is_running = self.playback_engine.playback
+        # Also update our intended state flag if engine stopped by itself
+        if self._active and not engine_is_running:
+            # print("Syncing state: Engine stopped, marking inactive.") # Debug
+            self._active = False
+        return engine_is_running
 
     def wait_for_playback_to_finish(self, check_interval=0.2):
-        """Wait until playback (via singleton engine) is no longer active."""
-        # Check engine state directly
-        if not self.playback_engine.playback and not self._active:
-            # print("Playback not running, nothing to wait for.")
+        """Wait until playback engine thread is no longer active."""
+        if not self.is_playing():  # Use our updated is_playing()
+            # print("Playback not running, nothing to wait for.") # Verbose
             return
 
-        print("Waiting for playback to finish...")
-        while self.playback_engine.playback:  # Check the engine's flag
+        print("Waiting for playback engine to finish...")
+        # Loop while the engine thread reports it's running
+        while self.playback_engine.playback:  # Check engine flag directly here
+            # --- NEW: Check for main loop stop request DURING wait ---
+            if self.should_main_loop_stop():
+                print("Main loop stop requested during wait. Aborting wait.")
+                # Ensure playback stop is triggered again if needed
+                if self.playback_engine.playback:
+                    print("Re-requesting engine stop...")
+                    Thread(
+                        target=self.playback_engine.stop_playback, daemon=True
+                    ).start()
+                break  # Exit the wait loop early
+
             try:
                 time.sleep(check_interval)
-            except KeyboardInterrupt:
-                print("\nWait interrupted by user (Ctrl+C). Requesting stop...")
-                self.stop_playback()  # Use the proper stop method
-                break  # Exit wait loop
+            except KeyboardInterrupt:  # Handle Ctrl+C during wait
+                print("\nWait interrupted by Ctrl+C. Requesting stop...")
+                self.request_main_loop_stop()  # Signal main loop too
+                Thread(target=self.playback_engine.stop_playback, daemon=True).start()
+                break
 
-        print("Playback finished or was stopped.")
-        self._active = False  # Ensure state reflects finished/stopped playback
+        # Update our active flag after waiting finishes
+        self._active = False
+        print("Wait finished. Playback engine stopped or main stop requested.")
 
-    # --- Configuration Methods (modify settings on the single instance) ---
-
-    def set_stop_key(self, key_name):
-        """Set the keyboard key to stop playback (e.g., 'esc', 'f12', 'q')."""
-        self.playback_engine.set_stop_key_from_string(key_name)
-
+    # --- Configuration Methods (remain the same, operate on self.settings) ---
     def set_playback_speed(self, speed):
-        """Set the playback speed (multiplier)."""
         if 0.1 <= speed <= 10:
             self.settings.change_settings("Playback", "Speed", None, float(speed))
-            # print(f"Playback speed set to: {speed}") # Less verbose
         else:
-            print("Error: Playback speed must be between 0.1 and 10.")
+            print("Error: Playback speed must be between 0.1 and 10.", file=sys.stderr)
 
+    # ... other configuration methods (set_repeat_times, etc.) remain the same ...
     def set_repeat_times(self, times):
-        """Set the number of times to repeat the macro (use if duration is 0)."""
         times = int(times)
         if 1 <= times <= 100000000:
             self.settings.change_settings("Playback", "Repeat", "Times", times)
             if self.settings.get_config()["Playback"]["Repeat"]["For"] != 0:
                 self.settings.change_settings("Playback", "Repeat", "For", 0)
-                # print("Note: Repeat duration automatically set to 0.")
-            # print(f"Repeat times set to: {times}")
         else:
-            print("Error: Repeat times must be between 1 and 100000000.")
+            print(
+                "Error: Repeat times must be between 1 and 100000000.", file=sys.stderr
+            )
 
     def set_repeat_for_duration(self, duration_sec):
-        """Set the macro to repeat for a specific duration in seconds (0 to disable)."""
         duration_sec = float(duration_sec)
         if 0 <= duration_sec <= 86400 * 7:
             self.settings.change_settings("Playback", "Repeat", "For", duration_sec)
-            # print(f"Repeat for duration set to: {duration_sec} seconds (0 means use 'Times').")
         else:
-            print("Error: Repeat duration must be between 0 and 604800 seconds.")
+            print(
+                "Error: Repeat duration must be between 0 and 604800 seconds.",
+                file=sys.stderr,
+            )
 
     def set_fixed_timestamp(self, timestamp_ms):
-        """Set a fixed timestamp for all events in milliseconds (0 = use recorded)."""
         timestamp_ms = int(timestamp_ms)
         if 0 <= timestamp_ms <= 100000000:
             self.settings.change_settings(
                 "Others", "Fixed_timestamp", None, timestamp_ms
             )
-            # print(f"Fixed timestamp set to: {timestamp_ms} ms (0 means use recorded * speed).")
         else:
-            print("Error: Fixed timestamp must be between 0 and 100000000 ms.")
+            print(
+                "Error: Fixed timestamp must be between 0 and 100000000 ms.",
+                file=sys.stderr,
+            )
 
     def set_scheduled_start(self, scheduled_sec_since_midnight):
-        """Set scheduled start time in seconds since midnight (0 to disable)."""
         scheduled_sec_since_midnight = int(scheduled_sec_since_midnight)
         if 0 <= scheduled_sec_since_midnight <= 86400:
             self.settings.change_settings(
                 "Playback", "Repeat", "Scheduled", scheduled_sec_since_midnight
             )
-            # print(f"Scheduled start set to: {scheduled_sec_since_midnight} seconds since midnight.")
         else:
-            print("Error: Scheduled start must be between 0 and 86400.")
+            print(
+                "Error: Scheduled start must be between 0 and 86400.", file=sys.stderr
+            )
 
     def set_delay_between_repeats(self, delay_sec):
-        """Set delay between repeats in seconds."""
         delay_sec = float(delay_sec)
         if 0 <= delay_sec <= 100000000:
             self.settings.change_settings("Playback", "Repeat", "Delay", delay_sec)
-            # print(f"Delay between repeats set to: {delay_sec} seconds.")
         else:
-            print("Error: Delay must be between 0 and 100000000 seconds.")
+            print(
+                "Error: Delay must be between 0 and 100000000 seconds.", file=sys.stderr
+            )
 
 
 # --- Wrapper Function (play_macro) ---
-# This function now uses the singleton implicitly
+# This function now uses the singleton implicitly and primarily configures/starts playback
 def play_macro(
-    file_name, speed=1.0, repeat_times=1, delay_between_repeats=0.5, stop_key="esc"
+    file_name,
+    speed=1.0,
+    repeat_times=1,
+    delay_between_repeats=0.5,
+    # removed stop_key argument, as it's now global to the singleton
 ):
-    """
-    Wrapper function to play a macro file using the singleton PyMacroRecordLib instance.
-    """
+    """Plays a macro file using the singleton PyMacroRecordLib instance."""
     if not os.path.exists(file_name):
-        print(f"Macro file not found: {file_name}")
+        print(f"Macro file not found: {file_name}", file=sys.stderr)
         return False
 
-    # Get the singleton instance
-    pmr_lib = PyMacroRecordLib()  # This will always return the *same* instance
+    pmr_lib = PyMacroRecordLib()  # Get the singleton
 
-    # Configure playback settings on the singleton instance for this specific call
+    # --- NEW: Check if main loop stop was already requested ---
+    if pmr_lib.should_main_loop_stop():
+        print(
+            f"Skipping macro '{os.path.basename(file_name)}' as main loop stop is requested."
+        )
+        return False  # Don't even try to play if stop is already active
+
+    # Configure playback settings for this specific call
     pmr_lib.set_playback_speed(speed)
     pmr_lib.set_repeat_times(repeat_times)
     pmr_lib.set_delay_between_repeats(delay_between_repeats)
-    pmr_lib.set_stop_key(stop_key)  # Set/confirm stop key
+    # pmr_lib.set_stop_key(stop_key) # REMOVED - stop key is global now
 
-    # Load and play the macro using the singleton instance
+    # Load and play
     if pmr_lib.load_macro_file(file_name):
-        print(f"Playing macro '{os.path.basename(file_name)}' via singleton...")
-        pmr_lib.start_playback()
+        print(f"Playing macro '{os.path.basename(file_name)}'...")
+        pmr_lib.start_playback()  # Start the engine thread
 
-        # Wait for playback to finish using the singleton's wait method
+        # Wait for this specific playback run to finish OR main stop request
         pmr_lib.wait_for_playback_to_finish()
-        # print("Macro playback completed via singleton.") # wait_for... prints messages
-        return True
+
+        # Check AGAIN if main stop was requested DURING playback/wait
+        if pmr_lib.should_main_loop_stop():
+            print(
+                f"Macro '{os.path.basename(file_name)}' interrupted by global stop request."
+            )
+            return False  # Indicate it was stopped prematurely
+
+        print(f"Macro '{os.path.basename(file_name)}' finished.")
+        return True  # Indicate successful completion
     else:
-        print(f"Failed to load macro file: {file_name}")
+        print(f"Failed to load macro file: {file_name}", file=sys.stderr)
         return False
 
 
-# --- Example Usage (remains the same) ---
+# --- Example Usage (Modified) ---
 if __name__ == "__main__":
     import time
 
-    # --- Create a dummy macro file for testing ---
+    # ... (dummy macro file creation remains the same) ...
     dummy_macro_file = "checkpsmapet.pmr"
-    # ... (keep dummy_macro_data definition as before) ...
-    dummy_macro_data = {
+    dummy_macro_data = {  # Shortened example
         "events": [
-            {"type": "cursorMove", "x": 100, "y": 100, "timestamp": 0.5},
+            {"type": "cursorMove", "x": 100, "y": 100, "timestamp": 0.2},
             {
                 "type": "leftClickEvent",
                 "x": 100,
@@ -757,22 +776,10 @@ if __name__ == "__main__":
                 "pressed": False,
                 "timestamp": 0.1,
             },
-            {"type": "keyboardEvent", "key": "a", "pressed": True, "timestamp": 0.2},
-            {"type": "keyboardEvent", "key": "a", "pressed": False, "timestamp": 0.1},
-            {"type": "cursorMove", "x": 300, "y": 300, "timestamp": 0.5},
-            {
-                "type": "keyboardEvent",
-                "key": "Key.enter",
-                "pressed": True,
-                "timestamp": 0.2,
-            },
-            {
-                "type": "keyboardEvent",
-                "key": "Key.enter",
-                "pressed": False,
-                "timestamp": 0.1,
-            },
-            {"type": "scrollEvent", "dx": 0, "dy": -2, "timestamp": 0.3},
+            {"type": "keyboardEvent", "key": "'H'", "pressed": True, "timestamp": 0.1},
+            {"type": "keyboardEvent", "key": "'H'", "pressed": False, "timestamp": 0.1},
+            {"type": "keyboardEvent", "key": "'i'", "pressed": True, "timestamp": 0.1},
+            {"type": "keyboardEvent", "key": "'i'", "pressed": False, "timestamp": 0.1},
         ]
     }
     try:
@@ -780,61 +787,51 @@ if __name__ == "__main__":
             json.dump(dummy_macro_data, f, indent=4)
         print(f"Created dummy macro file: {dummy_macro_file}")
     except Exception as e:
-        print(f"Error creating dummy macro file: {e}")
+        print(f"Error creating dummy macro file: {e}", file=sys.stderr)
         dummy_macro_file = None
 
     if dummy_macro_file:
-        # --- Initialize the library (implicitly gets singleton) ---
-        print("\n--- Initializing/Getting Singleton Instance ---")
-        # First call implicitly creates/initializes the singleton
-        pmr_lib_1 = PyMacroRecordLib()
-        print(f"Instance 1 ID: {id(pmr_lib_1)}")
+        print("\n--- Getting Singleton Instance (starts listener) ---")
+        pmr_lib = PyMacroRecordLib()
+        pmr_lib.set_stop_key("esc")  # Set the desired global stop key
 
-        # --- Configure Playback (operates on the single instance) ---
-        print("\n--- Configuration ---")
-        pmr_lib_1.set_playback_speed(1.5)
-        pmr_lib_1.set_repeat_times(3)
-        pmr_lib_1.set_delay_between_repeats(1.0)
-        pmr_lib_1.set_stop_key("esc")
-
-        # --- Demonstrate Singleton ---
-        print("\n--- Getting Singleton Instance Again ---")
-        # Second call returns the *same* instance
-        pmr_lib_2 = PyMacroRecordLib()
-        print(f"Instance 2 ID: {id(pmr_lib_2)}")
-        print(f"Instances are the same: {id(pmr_lib_1) == id(pmr_lib_2)}")
-        # Settings are persistent on the singleton
         print(
-            f"Speed on instance 2: {pmr_lib_2.settings.get_config()['Playback']['Speed']}"
+            f"\n--- Running Test Loop (Press '{pmr_lib.stop_key}' to stop everything) ---"
         )
+        # Reset stop flag before starting test loop
+        pmr_lib.reset_main_loop_stop_request()
 
-        # --- Example 1: Play Macro using the wrapper function ---
-        # The wrapper function `play_macro` will internally get the same singleton instance
-        print("\n--- Example 1: Play Macro via Wrapper (Press Esc to interrupt) ---")
-        play_macro(
-            dummy_macro_file,
-            speed=1.0,
-            repeat_times=2,
-            delay_between_repeats=0.5,
-            stop_key="f1",
-        )  # Override settings for this call
+        for i in range(5):  # Run a few iterations for testing
+            print(f"\n--- Test Loop Iteration {i+1} ---")
 
-        print("\n--- Example 2: Play Macro directly using instance methods ---")
-        # You can still use the instance directly if preferred
-        pmr_lib_1.set_playback_speed(2.0)  # Change speed again
-        pmr_lib_1.set_repeat_times(1)
-        pmr_lib_1.set_stop_key("esc")  # Back to Esc
-        if pmr_lib_1.load_macro_file(dummy_macro_file):
-            pmr_lib_1.start_playback()
-            pmr_lib_1.wait_for_playback_to_finish()
+            # Check for stop request at the beginning of the loop
+            if pmr_lib.should_main_loop_stop():
+                print("Stop requested, breaking main test loop.")
+                break
+
+            print(f"Running macro {dummy_macro_file}...")
+            success = play_macro(
+                dummy_macro_file, speed=1.0, repeat_times=2, delay_between_repeats=0.3
+            )
+
+            if not success and pmr_lib.should_main_loop_stop():
+                print("Macro play interrupted by stop key, breaking main test loop.")
+                break  # Exit loop if macro was stopped by Esc
+
+            # Simulate other work in the loop
+            if not pmr_lib.should_main_loop_stop():
+                print("Doing other work...")
+                time.sleep(0.5)
+
+        print("\n--- Test Loop Finished ---")
 
         # --- Clean up dummy file ---
         try:
             os.remove(dummy_macro_file)
             print(f"Cleaned up dummy macro file: {dummy_macro_file}")
         except Exception as e:
-            print(f"Error removing dummy macro file: {e}")
+            print(f"Error removing dummy macro file: {e}", file=sys.stderr)
 
     print("\nAll examples completed.")
 
-# --- END OF FILE macro.py ---
+# --- END OF FILE macro.py ---s
