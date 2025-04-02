@@ -44,48 +44,65 @@ def check_tesseract_installed():
         return False
 
 
-def capture_and_ocr(target_phrase="PSMA PET", monitor_num=1, debug_save=False):
+def capture_and_ocr(
+    target_phrase="PSMA PET", monitor_num=1, debug_save=False, region=None
+):
     """
-    Internal helper: Takes a screenshot of a specified monitor, performs OCR,
+    Internal helper: Takes a screenshot of a specified monitor or region, performs OCR,
     and checks if a target phrase exists.
 
     Args:
         target_phrase (str): The text to search for (case-insensitive).
         monitor_num (int): The monitor number (1=primary, 2=secondary, 0=all).
         debug_save (bool): If True, saves the screenshot for debugging.
+        region (tuple, optional): Region to capture as (left, top, right, bottom) coordinates.
+                                    If provided, will only capture this region.
 
     Returns:
         tuple: (bool, str or None)
-               - bool: True if the target_phrase was found, False otherwise.
-               - str: The full extracted text if successful, None if an error occurred
-                      during screenshot or OCR.
+                - bool: True if the target_phrase was found, False otherwise.
+                - str: The full extracted text if successful, None if an error occurred
+                        during screenshot or OCR.
     """
-    print(f"Attempting to capture monitor {monitor_num}...")
+    print(
+        f"Attempting to capture {'region' if region else f'monitor {monitor_num}'}..."
+    )
     try:
         with mss.mss() as sct:
-            # Adjust monitor selection logic slightly for clarity
-            monitors = sct.monitors
-            if monitor_num < 0 or monitor_num >= len(monitors):
-                print(
-                    f"Warning: Monitor number {monitor_num} is invalid. Available monitors: {len(monitors)} (0=all, 1=primary, ...). Falling back to monitor 1 (primary).",
-                    file=sys.stderr,
-                )
-                monitor_num = 1  # Default to primary
-                if monitor_num >= len(monitors):  # If only monitor 0 (all) exists
-                    monitor_num = 0
+            # If region is specified, use it directly
+            if region:
+                left, top, right, bottom = region
+                monitor = {
+                    "left": left,
+                    "top": top,
+                    "width": right - left,
+                    "height": bottom - top,
+                }
+                print(f"Capturing region: {region}")
+            else:
+                # Adjust monitor selection logic slightly for clarity
+                monitors = sct.monitors
+                if monitor_num < 0 or monitor_num >= len(monitors):
+                    print(
+                        f"Warning: Monitor number {monitor_num} is invalid. Available monitors: {len(monitors)} (0=all, 1=primary, ...). Falling back to monitor 1 (primary).",
+                        file=sys.stderr,
+                    )
+                    monitor_num = 1  # Default to primary
+                    if monitor_num >= len(monitors):  # If only monitor 0 (all) exists
+                        monitor_num = 0
 
-            if monitor_num == 0 and len(monitors) > 1:
-                print(
-                    "Capturing all monitors combined. This might yield unexpected OCR results."
-                )
-            elif monitor_num == 1 and len(monitors) > 1:
-                print("Capturing primary monitor.")
-            elif monitor_num > 0:
-                print(f"Capturing monitor {monitor_num}.")
-            else:  # Only monitor 0 exists
-                print("Capturing the only available monitor.")
+                if monitor_num == 0 and len(monitors) > 1:
+                    print(
+                        "Capturing all monitors combined. This might yield unexpected OCR results."
+                    )
+                elif monitor_num == 1 and len(monitors) > 1:
+                    print("Capturing primary monitor.")
+                elif monitor_num > 0:
+                    print(f"Capturing monitor {monitor_num}.")
+                else:  # Only monitor 0 exists
+                    print("Capturing the only available monitor.")
 
-            monitor = monitors[monitor_num]
+                monitor = monitors[monitor_num]
 
             # Capture the screen
             sct_img = sct.grab(monitor)
@@ -138,24 +155,30 @@ def capture_and_ocr(target_phrase="PSMA PET", monitor_num=1, debug_save=False):
 
 
 # --- The Wrapper Function ---
-def find_text_on_screen(search_term, monitor_to_capture=1, save_screenshot=False):
+def find_text_on_screen(
+    search_term, monitor_to_capture=1, save_screenshot=False, region=None
+):
     """
-    Captures the specified monitor's screen, performs OCR, and checks if
+    Captures the specified monitor's screen or region, performs OCR, and checks if
     the search_term exists anywhere on that screen.
 
     Args:
         search_term (str): The text phrase to search for (case-insensitive).
         monitor_to_capture (int): The monitor number to capture
-                                  (1: primary, 2: secondary, etc., 0: all monitors).
-                                  Defaults to 1 (primary).
+                                    (1: primary, 2: secondary, etc., 0: all monitors).
+                                    Defaults to 1 (primary). Ignored if region is specified.
         save_screenshot (bool): If True, saves the captured screenshot as
                                 'screenshot_debug.png'. Defaults to False.
+        region (tuple, optional): Region to capture as (left, top, right, bottom) coordinates.
+                                    If provided, will only capture this region instead of the full monitor.
 
     Returns:
         bool: True if the search_term is found, False otherwise (including
-              if Tesseract is not found or errors occur during capture/OCR).
+                if Tesseract is not found or errors occur during capture/OCR).
     """
     print(f"\n--- Starting screen search for: '{search_term}' ---")
+    if region:
+        print(f"Searching within region: {region}")
 
     # 1. Prerequisite check
     if not check_tesseract_installed():
@@ -168,7 +191,12 @@ def find_text_on_screen(search_term, monitor_to_capture=1, save_screenshot=False
         target_phrase=search_term,
         monitor_num=monitor_to_capture,
         debug_save=save_screenshot,
+        region=region,
     )
+
+    print(
+        "EXTRACTED TEXT", extracted_text
+    )  # Optional: Print the extracted text for debugging
 
     # 3. Interpret the results
     if extracted_text is None:
