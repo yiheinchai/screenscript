@@ -23,6 +23,15 @@ def close_patient_lookup():
     )
 
 
+def close_break_glass():
+    # Close the break-the-glass
+    play_macro(
+        Path(BASE_PATH) / "close_break_glass.pmr",
+        speed=2,
+        repeat_times=1,
+    )
+
+
 def view_found_patient():
     # View the found patient
     play_macro(
@@ -30,6 +39,15 @@ def view_found_patient():
         speed=2,
         repeat_times=1,
     )
+
+    has_break_the_glass = find_text_on_screen(
+        "Break-the-Glass", region=(175, 240, 305, 365)
+    )
+
+    if has_break_the_glass:
+        close_break_glass()
+        close_patient_lookup()
+        return False
 
 
 def search_psma_pet():
@@ -64,5 +82,5 @@ def find_patient():
         close_patient_lookup()
         return False
     else:
-        view_found_patient()
-        return True
+        view_successful = view_found_patient()
+        return view_successful
