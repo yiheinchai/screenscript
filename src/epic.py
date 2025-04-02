@@ -33,12 +33,18 @@ def view_found_patient():
 
 
 def search_psma_pet():
-    # Search for PSMA PET
-    play_macro(
-        Path(BASE_PATH) / "search_psma_pet.pmr",
-        speed=2,
-        repeat_times=1,
-    )
+    search_successful = False
+    max_retries = 3
+    while not search_successful and max_retries > 0:
+        play_macro(
+            Path(BASE_PATH) / "search_psma_pet.pmr",
+            speed=2,
+            repeat_times=1,
+        )
+        search_successful = find_text_on_screen(
+            "Search results for", region=(170, 166, 342, 201)
+        )
+        max_retries -= 1
 
 
 def find_patient():
