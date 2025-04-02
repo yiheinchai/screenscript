@@ -73,6 +73,22 @@ def find_patient():
         repeat_times=1,
     )
 
+    not_searched_yet = find_text_on_screen(
+        "to get started", region=(335, 666, 600, 685)
+    )
+    max_retries = 3
+    while not_searched_yet and max_retries > 0:
+        close_patient_lookup()
+        play_macro(
+            Path(BASE_PATH) / "find_patient.pmr",
+            speed=2,
+            repeat_times=1,
+        )
+        not_searched_yet = find_text_on_screen(
+            "to get started", region=(335, 666, 600, 685)
+        )
+        max_retries -= 1
+
     no_patient_found = find_text_on_screen(
         "No patients were found", region=(22, 336, 909, 404)
     )
