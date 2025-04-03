@@ -105,7 +105,7 @@ def view_found_patient():
             # Failed to view the patient, try again
             return False
 
-    do_and_verify(
+    result = do_and_verify(
         do_action=_view_found_patient,
         verify_success=verify_success,
     )
@@ -113,7 +113,7 @@ def view_found_patient():
     if glass_appeared:
         return False
 
-    return True
+    return result
 
 
 def search_psma_pet():
@@ -139,11 +139,26 @@ def search_psma_pet():
 
 def find_patient():
     # Find the patient
+    non_existent_patient = False
+
     def verify_success():
+        nonlocal non_existent_patient
+
         not_searched_yet = find_text_on_screen(
             "to get started", region=(24, 374, 900, 888)
         )
-        return not not_searched_yet
+        if not_searched_yet:
+            return not not_searched_yet
+
+        no_patient_found = find_text_on_screen(
+            "No patients were found", region=(22, 336, 909, 404)
+        )
+
+        if no_patient_found:
+            # If no patients were found, close the patient
+            close_patient_lookup()
+            non_existent_patient = True
+            return True
 
     def clean_up():
         # Close the patient lookup
@@ -163,13 +178,7 @@ def find_patient():
         retries=3,
     )
 
-    no_patient_found = find_text_on_screen(
-        "No patients were found", region=(22, 336, 909, 404)
-    )
-
-    if no_patient_found:
-        # If no patients were found, close the patient
-        close_patient_lookup()
+    if non_existent_patient:
         return False
     else:
         view_successful = view_found_patient()

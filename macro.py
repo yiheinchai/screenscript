@@ -10,6 +10,7 @@ from threading import Thread, RLock
 import json
 import os
 import sys  # Import sys for stderr
+import CONSTANTS
 
 # ... (Keep KEY_NAME_MAP and vk_nb dictionaries as they are) ...
 KEY_NAME_MAP = {
@@ -726,7 +727,7 @@ def play_macro(
         return False  # Don't even try to play if stop is already active
 
     # Configure playback settings for this specific call
-    pmr_lib.set_playback_speed(speed)
+    pmr_lib.set_playback_speed(speed * CONSTANTS.SPEED_MULTIPLIER)
     pmr_lib.set_repeat_times(repeat_times)
     pmr_lib.set_delay_between_repeats(delay_between_repeats)
     # pmr_lib.set_stop_key(stop_key) # REMOVED - stop key is global now
