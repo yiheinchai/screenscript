@@ -74,20 +74,43 @@ def close_break_glass():
 
 
 def view_found_patient():
+    glass_appeared = False
+
     # View the found patient
-    play_macro(
-        Path(BASE_PATH) / "view_found_patient.pmr",
-        speed=2,
-        repeat_times=1,
+    def _view_found_patient():
+        play_macro(
+            Path(BASE_PATH) / "view_found_patient.pmr",
+            speed=2,
+            repeat_times=1,
+        )
+
+    def verify_success():
+        nonlocal glass_appeared
+        # Verify that the patient is viewed
+        patient_viewed = find_text_on_screen("Chart Re", region=(97, 205, 270, 236))
+
+        if patient_viewed:
+            return True
+        else:
+            has_break_the_glass = find_text_on_screen(
+                "Break-the-Glass", region=(175, 240, 305, 365)
+            )
+
+            if has_break_the_glass:
+                close_break_glass()
+                close_patient_lookup()
+                glass_appeared = True
+                return True
+
+            # Failed to view the patient, try again
+            return False
+
+    do_and_verify(
+        do_action=_view_found_patient,
+        verify_success=verify_success,
     )
 
-    has_break_the_glass = find_text_on_screen(
-        "Break-the-Glass", region=(175, 240, 305, 365)
-    )
-
-    if has_break_the_glass:
-        close_break_glass()
-        close_patient_lookup()
+    if glass_appeared:
         return False
 
     return True
