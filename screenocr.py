@@ -2,6 +2,7 @@ import mss
 import pytesseract
 from PIL import Image
 import sys
+import re
 
 # --- Configuration (Optional but Recommended) ---
 # On Windows, you might need to uncomment and set the correct path:
@@ -45,22 +46,27 @@ def check_tesseract_installed():
 
 
 def capture_and_ocr(
-    target_phrase="PSMA PET", monitor_num=1, debug_save=False, region=None
+    target_phrase="PSMA PET",
+    monitor_num=1,
+    debug_save=False,
+    region=None,
+    use_regex=False,
 ):
     """
     Internal helper: Takes a screenshot of a specified monitor or region, performs OCR,
-    and checks if a target phrase exists.
+    and checks if a target phrase or regex pattern exists.
 
     Args:
-        target_phrase (str): The text to search for (case-insensitive).
+        target_phrase (str): The text or regex pattern to search for (case-insensitive).
         monitor_num (int): The monitor number (1=primary, 2=secondary, 0=all).
         debug_save (bool): If True, saves the screenshot for debugging.
         region (tuple, optional): Region to capture as (left, top, right, bottom) coordinates.
                                     If provided, will only capture this region.
+        use_regex (bool): If True, interprets target_phrase as a regex pattern.
 
     Returns:
         tuple: (bool, str or None)
-                - bool: True if the target_phrase was found, False otherwise.
+                - bool: True if the target_phrase or regex pattern was found, False otherwise.
                 - str: The full extracted text if successful, None if an error occurred
                         during screenshot or OCR.
     """
@@ -130,10 +136,6 @@ def capture_and_ocr(
     try:
         # Perform OCR using pytesseract
         extracted_text = pytesseract.image_to_string(img)
-        # Optional: Print extracted text for debugging
-        # print("\n--- Extracted Text ---")
-        # print(extracted_text)
-        # print("--- End Extracted Text ---\n")
         print("OCR complete.")
 
     except pytesseract.TesseractNotFoundError:
@@ -148,22 +150,33 @@ def capture_and_ocr(
         return False, None  # Indicate failure
 
     print(f"Searching for '{target_phrase}' (case-insensitive)...")
-    # Check if the target phrase exists (case-insensitive)
-    found = target_phrase.lower() in extracted_text.lower()
+    # Check if the target phrase or regex pattern exists
+    if use_regex:
+        try:
+            found = re.search(target_phrase, extracted_text, re.IGNORECASE) is not None
+        except re.error as regex_error:
+            print(f"Invalid regex pattern: {regex_error}", file=sys.stderr)
+            return False, None
+    else:
+        found = target_phrase.lower() in extracted_text.lower()
 
     return found, extracted_text  # Return status and full text
 
 
 # --- The Wrapper Function ---
 def find_text_on_screen(
-    search_term, monitor_to_capture=1, save_screenshot=False, region=None
+    search_term,
+    monitor_to_capture=1,
+    save_screenshot=False,
+    region=None,
+    use_regex=False,
 ):
     """
     Captures the specified monitor's screen or region, performs OCR, and checks if
     the search_term exists anywhere on that screen.
 
     Args:
-        search_term (str): The text phrase to search for (case-insensitive).
+        search_term (str): The text phrase or regex pattern to search for (case-insensitive).
         monitor_to_capture (int): The monitor number to capture
                                     (1: primary, 2: secondary, etc., 0: all monitors).
                                     Defaults to 1 (primary). Ignored if region is specified.
@@ -171,6 +184,7 @@ def find_text_on_screen(
                                 'screenshot_debug.png'. Defaults to False.
         region (tuple, optional): Region to capture as (left, top, right, bottom) coordinates.
                                     If provided, will only capture this region instead of the full monitor.
+        use_regex (bool): If True, interprets search_term as a regex pattern.
 
     Returns:
         bool: True if the search_term is found, False otherwise (including
@@ -192,6 +206,7 @@ def find_text_on_screen(
         monitor_num=monitor_to_capture,
         debug_save=save_screenshot,
         region=region,
+        use_regex=use_regex,
     )
 
     print(
@@ -214,6 +229,119 @@ def find_text_on_screen(
 
     print("--- Screen search finished ---")
     return result
+
+
+def find_text_and_return(
+    regex_pattern,
+    monitor_num=1,
+    debug_save=False,
+    region=None,
+):
+    """
+    Captures a screenshot of a specified monitor or region, performs OCR,
+    and extracts text matching a regex pattern.
+
+    Args:
+        regex_pattern (str): The regex pattern to search for and extract.
+        monitor_num (int): The monitor number (1=primary, 2=secondary, 0=all).
+        debug_save (bool): If True, saves the screenshot for debugging.
+        region (tuple, optional): Region to capture as (left, top, right, bottom) coordinates.
+                                    If provided, will only capture this region.
+
+    Returns:
+        list: A list of all matches found using the regex pattern.
+              Returns an empty list if no matches are found or an error occurs.
+    """
+    print(
+        f"Attempting to capture {'region' if region else f'monitor {monitor_num}'} for regex extraction..."
+    )
+    try:
+        with mss.mss() as sct:
+            # If region is specified, use it directly
+            if region:
+                left, top, right, bottom = region
+                monitor = {
+                    "left": left,
+                    "top": top,
+                    "width": right - left,
+                    "height": bottom - top,
+                }
+                print(f"Capturing region: {region}")
+            else:
+                # Adjust monitor selection logic slightly for clarity
+                monitors = sct.monitors
+                if monitor_num < 0 or monitor_num >= len(monitors):
+                    print(
+                        f"Warning: Monitor number {monitor_num} is invalid. Available monitors: {len(monitors)} (0=all, 1=primary, ...). Falling back to monitor 1 (primary).",
+                        file=sys.stderr,
+                    )
+                    monitor_num = 1  # Default to primary
+                    if monitor_num >= len(monitors):  # If only monitor 0 (all) exists
+                        monitor_num = 0
+
+                if monitor_num == 0 and len(monitors) > 1:
+                    print(
+                        "Capturing all monitors combined. This might yield unexpected OCR results."
+                    )
+                elif monitor_num == 1 and len(monitors) > 1:
+                    print("Capturing primary monitor.")
+                elif monitor_num > 0:
+                    print(f"Capturing monitor {monitor_num}.")
+                else:  # Only monitor 0 exists
+                    print("Capturing the only available monitor.")
+
+                monitor = monitors[monitor_num]
+
+            # Capture the screen
+            sct_img = sct.grab(monitor)
+            print("Screenshot captured.")
+
+            # Convert to PIL Image
+            img = Image.frombytes("RGB", sct_img.size, sct_img.rgb)
+
+            if debug_save:
+                try:
+                    filename = "screenshot_debug.png"
+                    img.save(filename)
+                    print(f"Screenshot saved for debugging as {filename}")
+                except Exception as save_e:
+                    print(
+                        f"Warning: Could not save debug screenshot: {save_e}",
+                        file=sys.stderr,
+                    )
+
+    except Exception as e:
+        print(f"Error taking screenshot: {e}", file=sys.stderr)
+        return []  # Indicate failure
+
+    print("Performing OCR...")
+    try:
+        # Perform OCR using pytesseract
+        extracted_text = pytesseract.image_to_string(img)
+        print("OCR complete.")
+
+    except pytesseract.TesseractNotFoundError:
+        # This should ideally be caught by check_tesseract_installed, but double-check
+        print(
+            "ERROR: Tesseract OCR engine not found or not in PATH during OCR process.",
+            file=sys.stderr,
+        )
+        return []
+    except Exception as e:
+        print(f"Error during OCR: {e}", file=sys.stderr)
+        return []  # Indicate failure
+
+    print(f"Extracting text using regex pattern: '{regex_pattern}'...")
+    try:
+        matches = re.findall(regex_pattern, extracted_text, re.IGNORECASE)
+        if matches:
+            print(f"Regex matches found: {matches}")
+        else:
+            print("No matches found using the provided regex pattern.")
+        return matches
+    except re.error as regex_error:
+        print(f"Invalid regex pattern: {regex_error}", file=sys.stderr)
+        return []  # Indicate failure
 
 
 # --- Main Execution Example ---
@@ -259,3 +387,6 @@ if __name__ == "__main__":
     #      print(f">>> TEST 4 RESULT: '{secondary_monitor_term}' was FOUND on monitor 2.")
     # else:
     #      print(f">>> TEST 4 RESULT: '{secondary_monitor_term}' was NOT FOUND on monitor 2 or an error occurred.")
+
+
+# def extract_table

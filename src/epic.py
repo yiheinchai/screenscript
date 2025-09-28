@@ -2,6 +2,7 @@ from macro import play_macro
 from screenocr import find_text_on_screen
 from pathlib import Path
 from .utils import do_and_verify
+from src import utils
 
 BASE_PATH = "/Users/yiheinchai/Documents/Learn/screenscript/src/"
 
@@ -62,12 +63,33 @@ def close_break_glass():
 
     def verify_success():
         has_break_the_glass = find_text_on_screen(
-            "Break-the-Glass", region=(175, 240, 305, 365)
+            "Break-the-Glass", region=(175, 240, 335, 365)
         )
         return not has_break_the_glass
 
     result = do_and_verify(
         do_action=_close_break_glass,
+        verify_success=verify_success,
+    )
+    return result
+
+
+def view_dead_patient():
+    def _view_dead_patient():
+        play_macro(
+            Path(BASE_PATH) / "view_dead_patient.pmr",
+            speed=2,
+            repeat_times=1,
+        )
+
+    def verify_success():
+        # Verify that the patient is viewed
+        patient_viewed = find_text_on_screen("Chart Re", region=(97, 205, 270, 236))
+
+        return patient_viewed
+
+    result = do_and_verify(
+        do_action=_view_dead_patient,
         verify_success=verify_success,
     )
     return result
@@ -93,13 +115,21 @@ def view_found_patient():
             return True
         else:
             has_break_the_glass = find_text_on_screen(
-                "Break-the-Glass", region=(175, 240, 305, 365)
+                "Break-the-Glass", region=(175, 240, 335, 365)
             )
 
             if has_break_the_glass:
                 close_break_glass()
                 close_patient_lookup()
                 glass_appeared = True
+                return True
+
+            is_patient_dead = find_text_on_screen(
+                "who is deceased", region=(196, 460, 761, 604)
+            )
+
+            if is_patient_dead:
+                view_dead_patient()
                 return True
 
             # Failed to view the patient, try again
@@ -127,7 +157,7 @@ def search_psma_pet():
     def verify_success():
         # Verify that the search was successful
         search_successful = find_text_on_screen(
-            "Search results for", region=(170, 166, 342, 201)
+            "Search results for", region=(177, 175, 352, 204)
         )
         return search_successful
 
@@ -147,11 +177,16 @@ def find_patient():
         not_searched_yet = find_text_on_screen(
             "to get started", region=(24, 374, 900, 888)
         )
+
+        patient_name_appeared = find_text_on_screen(
+            "Patient Name", region=(222, 382, 544, 497)
+        )
+
         if not_searched_yet:
-            return not not_searched_yet
+            return False
 
         no_patient_found = find_text_on_screen(
-            "No patients were found", region=(22, 336, 909, 404)
+            "No patients were found", region=(0, 373, 907, 827)
         )
 
         if no_patient_found:
@@ -160,6 +195,11 @@ def find_patient():
             non_existent_patient = True
             return True
 
+        if not patient_name_appeared:
+            return False
+
+        return True
+
     def clean_up():
         # Close the patient lookup
         close_patient_lookup()
@@ -167,6 +207,66 @@ def find_patient():
     def _find_patient():
         play_macro(
             Path(BASE_PATH) / "find_patient.pmr",
+            speed=2,
+            repeat_times=1,
+        )
+
+    do_and_verify(
+        do_action=_find_patient,
+        verify_success=verify_success,
+        clean_up=clean_up,
+        retries=3,
+    )
+
+    if non_existent_patient:
+        return False
+    else:
+        view_successful = view_found_patient()
+        return view_successful
+
+
+def find_patient_clipboard(mrn):
+    # Find the patient
+    non_existent_patient = False
+
+    def verify_success():
+        nonlocal non_existent_patient
+
+        not_searched_yet = find_text_on_screen(
+            "to get started", region=(24, 374, 900, 888)
+        )
+
+        patient_name_appeared = find_text_on_screen(
+            "Patient Name", region=(222, 382, 544, 497)
+        )
+
+        if not_searched_yet:
+            return False
+
+        no_patient_found = find_text_on_screen(
+            "No patients were found", region=(0, 373, 907, 827)
+        )
+
+        if no_patient_found:
+            # If no patients were found, close the patient
+            close_patient_lookup()
+            non_existent_patient = True
+            return True
+
+        if not patient_name_appeared:
+            return False
+
+        return True
+
+    def clean_up():
+        # Close the patient lookup
+        close_patient_lookup()
+
+    def _find_patient():
+        utils.send_to_clipboard(mrn)
+
+        play_macro(
+            Path(BASE_PATH) / "find_patient_clipboard.pmr",
             speed=2,
             repeat_times=1,
         )

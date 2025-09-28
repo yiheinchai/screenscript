@@ -27,3 +27,44 @@ def log_psma_pet(has_psma_pet):
             speed=1.5,
             repeat_times=1,
         )
+
+
+def log_psma_date(has_psma_date):
+    if has_psma_date is None:
+        play_macro(
+            Path(BASE_PATH) / "log_none_psma_date.pmr",
+            speed=1.5,
+            repeat_times=1,
+        )
+
+    if has_psma_date:
+        # If the patient has PSMA PET, log it
+        play_macro(
+            Path(BASE_PATH) / "log_yes_psma_date.pmr",
+            speed=1.5,
+            repeat_times=1,
+        )
+    else:
+        play_macro(
+            Path(BASE_PATH) / "log_no_psma_date.pmr",
+            speed=1.5,
+            repeat_times=1,
+        )
+
+
+def log_psma_history():
+    play_macro(
+        Path(BASE_PATH) / "log_psma_history.pmr",
+        speed=1,
+        repeat_times=1,
+    )
+    return True
+
+
+def nav_up():
+    play_macro(
+        Path(BASE_PATH) / "excel_nav_up.pmr",
+        speed=1.5,
+        repeat_times=1,
+    )
+    return True

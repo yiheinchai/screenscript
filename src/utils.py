@@ -1,5 +1,6 @@
 import time
 from typing import Callable
+import subprocess
 
 
 def retry_till_false(callback, retries=3, delay=1):
@@ -17,7 +18,7 @@ def do_and_verify(
     do_action: Callable[[], None],
     verify_success: Callable[[], bool],
     clean_up: Callable[[], None] = lambda: None,
-    retries: int = 3,
+    retries: int = 5,
 ) -> bool:
     """
     Perform an action and verify its success.
@@ -38,3 +39,18 @@ def do_and_verify(
         max_retries -= 1
 
     return is_success
+
+
+def send_to_clipboard(text: str):
+    """
+    Send text to the clipboard.
+    """
+    subprocess.run("pbcopy", text=True, input=text)
+
+
+def uk_to_us_date(uk_date: str) -> str:
+    """
+    Convert a UK date (DD/MM/YYYY) to a US date (MM/DD/YYYY).
+    """
+    day, month, year = uk_date.split("/")
+    return f"{month}/{day}/{year}"
