@@ -1,6 +1,8 @@
 import time
 from typing import Callable
 import subprocess
+import pyautogui
+import math
 
 
 def retry_till_false(callback, retries=3, delay=1):
@@ -18,7 +20,7 @@ def do_and_verify(
     do_action: Callable[[], None],
     verify_success: Callable[[], bool],
     clean_up: Callable[[], None] = lambda: None,
-    retries: int = 5,
+    retries: int = 10,
 ) -> bool:
     """
     Perform an action and verify its success.
@@ -29,6 +31,7 @@ def do_and_verify(
     max_retries = retries
     while not is_success and max_retries > 0:
         do_action()
+        time.sleep(0.3)  # Wait a bit before verification
         is_success = verify_success()
         if is_success:
             break
@@ -48,9 +51,90 @@ def send_to_clipboard(text: str):
     subprocess.run("pbcopy", text=True, input=text)
 
 
+def receive_from_clipboard() -> str:
+    """
+    Receive text from the clipboard.
+    """
+    result = subprocess.run("pbpaste", text=True, capture_output=True)
+    return result.stdout
+
+
+def clear_clipboard():
+    """
+    Clear the clipboard.
+    """
+    send_to_clipboard("")
+
+
 def uk_to_us_date(uk_date: str) -> str:
     """
     Convert a UK date (DD/MM/YYYY) to a US date (MM/DD/YYYY).
     """
     day, month, year = uk_date.split("/")
     return f"{month}/{day}/{year}"
+
+
+def find_and_click(image_path, offset_x=0, offset_y=0, button="left", confidence=0.8):
+    try:
+        button_location = pyautogui.locateCenterOnScreen(
+            image_path, confidence=confidence
+        )
+        if button_location:
+            pyautogui.click(
+                button_location.x + offset_x,
+                button_location.y + offset_y,
+                button=button,
+            )
+            return True
+        else:
+            print(f"Failed to find image: {image_path}")
+            return False
+    except Exception as e:
+        print(f"Error clicking on image: {e}")
+        return False
+
+
+def find_image_on_screen(image_path, confidence=0.8) -> bool:
+    try:
+        button_location = pyautogui.locateCenterOnScreen(
+            image_path, confidence=confidence
+        )
+        return button_location is not None
+    except Exception as e:
+        print(f"Error finding image on screen: {e}")
+        return False
+
+
+def click(x, y):
+    try:
+        pyautogui.click(x, y)
+        return True
+    except Exception as e:
+        print(f"Error clicking at ({x}, {y}): {e}")
+        return False
+
+
+def group_locations(locations, distance_threshold=20):
+    """
+    Groups nearby coordinate locations into single points.
+    It takes a list of locations (like those from pyautogui) and
+    returns a filtered list where clustered detections are reduced to one.
+    """
+    grouped_locations = []
+    for loc in locations:
+        # Check if the location is too close to any already in our grouped list
+        is_close_to_existing = False
+        for grouped_loc in grouped_locations:
+            # Calculate the Euclidean distance between the centers
+            dist = math.sqrt(
+                (loc.left - grouped_loc.left) ** 2 + (loc.top - grouped_loc.top) ** 2
+            )
+            if dist < distance_threshold:
+                is_close_to_existing = True
+                break
+
+        # If it's not close to any existing point, it's a new unique location
+        if not is_close_to_existing:
+            grouped_locations.append(loc)
+
+    return grouped_locations
