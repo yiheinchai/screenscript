@@ -4,6 +4,9 @@ import subprocess
 import pyautogui
 import math
 
+# Display scale factor: 2 for macOS Retina, 1 for non-Retina
+DISPLAY_SCALE = 2
+
 
 def retry_till_false(callback, retries=3, delay=1):
     time.sleep(delay)
@@ -81,8 +84,8 @@ def find_and_click(image_path, offset_x=0, offset_y=0, button="left", confidence
         )
         if button_location:
             pyautogui.click(
-                button_location.x + offset_x,
-                button_location.y + offset_y,
+                (button_location.x + offset_x) // DISPLAY_SCALE,
+                (button_location.y + offset_y) // DISPLAY_SCALE,
                 button=button,
             )
             return True
@@ -90,7 +93,7 @@ def find_and_click(image_path, offset_x=0, offset_y=0, button="left", confidence
             print(f"Failed to find image: {image_path}")
             return False
     except Exception as e:
-        print(f"Error clicking on image: {e}")
+        print(f"Error clicking on image '{image_path}': {e}")
         return False
 
 
@@ -101,13 +104,16 @@ def find_image_on_screen(image_path, confidence=0.8) -> bool:
         )
         return button_location is not None
     except Exception as e:
-        print(f"Error finding image on screen: {e}")
+        print(f"Error finding image on screen '{image_path}': {e}")
         return False
 
 
-def click(x, y):
+def click(x, y, scaled=False):
     try:
-        pyautogui.click(x, y)
+        if scaled:
+            pyautogui.click(x, y)
+        else:
+            pyautogui.click(x // DISPLAY_SCALE, y // DISPLAY_SCALE)
         return True
     except Exception as e:
         print(f"Error clicking at ({x}, {y}): {e}")
@@ -127,7 +133,7 @@ def group_locations(locations, distance_threshold=20):
         for grouped_loc in grouped_locations:
             # Calculate the Euclidean distance between the centers
             dist = math.sqrt(
-                (loc.left - grouped_loc.left) ** 2 + (loc.top - grouped_loc.top) ** 2
+                (loc[0] - grouped_loc[0]) ** 2 + (loc[1] - grouped_loc[1]) ** 2
             )
             if dist < distance_threshold:
                 is_close_to_existing = True

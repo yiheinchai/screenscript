@@ -6,7 +6,7 @@ from src import utils
 import pyautogui
 import time
 
-BASE_PATH = "/Users/yiheinchai/Documents/Learn/screenscript/src/"
+BASE_PATH = "/Users/yihein.chai/Documents/learn/screenscript/src"
 ASSETS_PATH = Path(BASE_PATH).parent / "assets"
 
 
@@ -85,13 +85,14 @@ def view_dead_patient():
 
 def view_found_patient():
     glass_appeared = False
+    patient_deceased = False
 
     # View the found patient
     def _view_found_patient():
         find_and_click(str(ASSETS_PATH / "accept.png"))
 
     def verify_success():
-        nonlocal glass_appeared
+        nonlocal glass_appeared, patient_deceased
         # Verify that the patient is viewed
         patient_viewed = find_image_on_screen(str(ASSETS_PATH / "chart_review.png"))
 
@@ -113,6 +114,7 @@ def view_found_patient():
             )
 
             if is_patient_dead:
+                patient_deceased = True
                 view_dead_patient()
                 return True
 
@@ -125,9 +127,9 @@ def view_found_patient():
     )
 
     if glass_appeared:
-        return False
+        return {"found": False, "deceased": False}
 
-    return result
+    return {"found": result, "deceased": patient_deceased}
 
 
 def search_psma_pet():
@@ -203,10 +205,9 @@ def find_patient():
     )
 
     if non_existent_patient:
-        return False
+        return {"found": False, "deceased": False}
     else:
-        view_successful = view_found_patient()
-        return view_successful
+        return view_found_patient()
 
 
 def find_patient_clipboard(mrn):
@@ -258,10 +259,9 @@ def find_patient_clipboard(mrn):
     )
 
     if non_existent_patient:
-        return False
+        return {"found": False, "deceased": False}
     else:
-        view_successful = view_found_patient()
-        return view_successful
+        return view_found_patient()
 
 
 def view_notes():
@@ -300,11 +300,13 @@ def view_imaging():
 
 def find_icons(type, confidence=0.9):
     try:
-        icons = list(
+        boxes = list(
             pyautogui.locateAllOnScreen(
                 str(ASSETS_PATH / f"{type}_icon.png"), confidence=confidence
             )
         )
+        icons = [(box.left + box.width // 2, box.top + box.height // 2) for box in boxes]
+        icons = utils.group_locations(icons)
     except Exception as e:
         print(f"Error finding {type} icons: {e}")
         icons = []
@@ -377,12 +379,15 @@ def copy_note_contents():
     )
 
     if not result:
-        return result
+        return ""
 
     result = do_and_verify(
         do_action=lambda: find_and_click(str(ASSETS_PATH / "copy_all.png")),
         verify_success=lambda: len(utils.receive_from_clipboard()) > 0,
     )
+
+    if not result:
+        return ""
 
     return utils.receive_from_clipboard()
 
